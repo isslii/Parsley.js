@@ -97,7 +97,7 @@ describe('ParsleyForm', () => {
     // group name on single required field, without value
     expect(parsleyForm.isValid('qux')).to.be(false);
   });
-  it('should send submit button values, even for async validations', () => {
+  it('should send submit button values, even for async validations', done => {
     var deferred = null;
     window.Parsley.addValidator('custom', () => {
       deferred = $.Deferred();
@@ -114,24 +114,34 @@ describe('ParsleyForm', () => {
     var parsleyForm = $('#element').parsley();
 
     $('#element input:last').click();
-    // Form should not be submitted at this point, coz field is required
+    // Form should not be submitted at this point, because field is required
     expect(deferred).to.be(null);
 
     $('#field1').val('something');
-    var values = [];
+
+    // The following is completely horrible. We store in `check` what we need to do on submit
+    // and make sure the check is called only once.
+    var check = null;
     $('#element').on('submit', evt => {
       expect(evt.parsley).to.be(true);
-      values.push($('form input[type!=submit][name="foo"]').val());
+      const todo = check;
+      check = null; // Clear `check` before calling it, so it can be reset to something else
+      todo($('form input[type!=submit][name="foo"]').val());
       evt.preventDefault();
     });
     $('#element input:last').click();
-    expect(values).to.eql([]);
+    check = val => {
+      expect(val).to.be('other');
+      $('#element').submit(); // Similar to pressing 'enter'
+      expect(deferred.state()).to.be('pending'); // Sanity check
+      check = val => {
+        expect(val).to.be('bar');
+        window.Parsley.removeValidator('custom');
+        done();
+      };
+      deferred.resolve();
+    };
     deferred.resolve();
-    expect(values).to.eql(['other']);
-    $('#element').submit(); // Similar to pressing 'enter'
-    deferred.resolve();
-    expect(values).to.eql(['other', 'bar']);
-    window.Parsley.removeValidator('custom');
   });
   it('should not validate when triggered by a button with formnovalidate', () => {
     var $form = $('<form id="element"><input type="string" required /><input type="submit" formnovalidate /><form>').appendTo($('body'));
@@ -329,12 +339,12 @@ describe('ParsleyForm', () => {
     expect(called).to.eql(2);
     expect(promise.state()).to.eql('pending');
     deferred.reject();
-    expect(promise.state()).to.eql('rejected');
-
-    $('#element').submit();
-    expect(called).to.eql(3);
-    shouldSubmit = true;
-    deferred.resolve();
+    promise.then(null, () => {
+      $('#element').submit();
+      expect(called).to.eql(3);
+      shouldSubmit = true;
+      deferred.resolve();
+    });
   });
 
   afterEach(() => {
